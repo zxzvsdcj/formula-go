@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: examples/go.sum
+      - name: Test root module
+        run: go test ./...
+      - name: Vet root module
+        run: go vet ./...
+      - name: Race test root module
+        run: go test -race ./...
+      - name: Test examples module
+        working-directory: examples
+        run: go test ./...
+      - name: Vet examples module
+        working-directory: examples
+        run: go vet ./...

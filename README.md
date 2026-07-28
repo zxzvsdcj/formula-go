@@ -13,7 +13,7 @@
 - ✅ **类型安全**: 使用 Go 的强类型系统，确保代码安全性
 - ✅ **完整实现**: 词法分析、语法分析、解释执行全流程
 - ✅ **丰富的内置函数**: 85 个内置函数，覆盖常用技术指标、数学统计、引用、逻辑和 8 个绘图事件函数
-- ✅ **通达信兼容语法**: 支持 `:` 输出声明、常用样式后缀、行情字段别名、中文标识符和字符串字面量
+- ✅ **通达信兼容语法**: 支持 `:` 输出声明、常用样式后缀、行情字段别名、中文标识符、单引号文本和双引号外部引用
 - ✅ **易于集成**: 简洁的 API 设计，易于集成到现有项目
 - ✅ **真实行情示例**: `examples/tdx_resistance_support` 可通过 TDX 接口拉取日 K 数据并计算阻力/支撑公式
 - ✅ **测试覆盖**: 注册表、README 函数清单、内置函数精准用例、参数边界、NaN 传播和 README 示例已建立一致性校验
@@ -75,8 +75,8 @@ func main() {
 - ✅ 通达信输出声明: `DIF: EMA(CLOSE, 12), COLORWHITE, LINETHICK2`
 - ✅ 输出样式后缀: `COLOR*`, `LINETHICK*`, `DOTLINE`, `STICK`, `COLORSTICK`, `VOLSTICK`, `NODRAW`
 - ✅ 中文标识符: `阻力1`, `支撑1`, `现价`
-- ✅ 字符串字面量: `'UP'`, `"UP"`，可用于 `DRAWTEXT`
-- ✅ 外部指标引用字面量: `"MACD.DIF#WEEK"`，当前仅在执行环境已存在同名变量时可解析
+- ✅ 文本字面量: `'UP'`，可用于 `DRAWTEXT`
+- ✅ 外部引用: `"MACD.DIF#WEEK"`；双引号内容按外部变量名解析，当前需要执行环境已存在同名变量
 
 ### 2. 内置函数
 
@@ -414,6 +414,12 @@ type FormulaEngine struct {}
 // 创建新引擎
 func NewFormulaEngine() *FormulaEngine
 
+// 使用自定义函数注册表创建引擎
+func NewFormulaEngineWithRegistry(functions *FunctionRegistry) *FormulaEngine
+
+// 注册后续执行可用的自定义函数（函数名不区分大小写）
+func (e *FormulaEngine) RegisterFunction(name string, fn Function)
+
 // 编译公式为 AST
 func (e *FormulaEngine) Compile(formula string) (*Program, error)
 
@@ -423,6 +429,25 @@ func (e *FormulaEngine) Execute(program *Program, marketData []*MarketData) (*Fo
 // 一步编译并执行
 func (e *FormulaEngine) Run(formula string, marketData []*MarketData) (*FormulaResult, error)
 ```
+
+### 自定义函数
+
+`Function` 接收已求值的参数和当前行情数据，返回一个 `Value` 或错误。可直接注册到引擎：
+
+```go
+engine := formula.NewFormulaEngine()
+engine.RegisterFunction("DOUBLE", func(args []*formula.Value, _ []*formula.MarketData) (*formula.Value, error) {
+    if len(args) != 1 || args[0].IsArray || args[0].IsString || args[0].IsDraw {
+        return nil, fmt.Errorf("DOUBLE expects one scalar argument")
+    }
+    return &formula.Value{Single: args[0].Single * 2}, nil
+})
+
+source := "RESULT := DOUBLE(21)"
+result, err := engine.Run(source, nil)
+```
+
+需要在多个引擎中共用一组自定义函数时，可先通过 `NewFunctionRegistry()` 创建注册表并调用 `Register`，再传给 `NewFormulaEngineWithRegistry`。引擎会复制注册表，后续修改原注册表不会改变已创建引擎的函数集。
 
 ### MarketData
 
@@ -491,7 +516,7 @@ type DrawingEvent struct {
 ### ✅ Phase 4: 通达信兼容增强
 
 - [x] 通达信输出声明、样式后缀和行情别名
-- [x] 中文标识符、字符串字面量和外部指标引用字面量
+- [x] 中文标识符、单引号文本和双引号外部引用
 - [x] 常用数学、统计、引用、逻辑、技术分析和基础绘图事件输出函数
 - [x] 内置函数注册表、README 清单和覆盖用例一致性校验
 - [x] 函数参数个数、常见边界、类型错误和 NaN 传播专项测试
@@ -525,6 +550,7 @@ go test ./engine -bench=. -benchmem
 
 - Go 版本以 `go.mod` 为准
 - 公式解析和执行核心无外部运行时服务依赖
+- `examples` 是独立 Go 模块，TDX 真实行情依赖只存在于该模块，不会引入核心模块
 
 ## 开发
 
@@ -535,6 +561,9 @@ cd formula-go
 
 # 运行测试
 go test ./...
+
+# 编译和测试独立的示例模块
+(cd examples && go test ./...)
 
 # 构建
 go build
@@ -574,5 +603,3 @@ ISC License
 - Issues: https://github.com/DTrader-store/formula-go/issues
 
 ---
-
-

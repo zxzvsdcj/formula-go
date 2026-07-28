@@ -59,19 +59,23 @@ type (
 // Export interpreter types
 type (
 	Value            = interpreter.Value
+	Function         = interpreter.Function
 	Interpreter      = interpreter.Interpreter
 	FunctionRegistry = interpreter.FunctionRegistry
 )
 
 // Constructor functions
 var (
-	NewMarketData    = types.NewMarketData
-	NewFormulaResult = types.NewFormulaResult
-	NewLexerError    = errors.NewLexerError
-	NewParserError   = errors.NewParserError
-	NewRuntimeError  = errors.NewRuntimeError
-	NewLexer         = lexer.NewLexer
-	NewParser        = parser.NewParser
-	NewFormulaEngine = engine.NewFormulaEngine
-	NewInterpreter   = interpreter.NewInterpreter
+	NewMarketData                = types.NewMarketData
+	NewFormulaResult             = types.NewFormulaResult
+	NewLexerError                = errors.NewLexerError
+	NewParserError               = errors.NewParserError
+	NewRuntimeError              = errors.NewRuntimeError
+	NewLexer                     = lexer.NewLexer
+	NewParser                    = parser.NewParser
+	NewFormulaEngine             = engine.NewFormulaEngine
+	NewFormulaEngineWithRegistry = engine.NewFormulaEngineWithRegistry
+	NewInterpreter               = interpreter.NewInterpreter
+	NewInterpreterWithRegistry   = interpreter.NewInterpreterWithRegistry
+	NewFunctionRegistry          = interpreter.NewFunctionRegistry
 )

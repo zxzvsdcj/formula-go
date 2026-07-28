@@ -1,7 +1,10 @@
 // Package types provides common types for market data and formula results
 package types
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // MarketData represents a single market data record with OHLCV data
 type MarketData struct {
@@ -34,6 +37,27 @@ func NewMarketData(open, close, high, low, volume, amount float64) *MarketData {
 // - amount must be a non-negative number
 // - high must be >= low
 func (m *MarketData) Validate() error {
+	if m == nil {
+		return fmt.Errorf("market data must not be nil")
+	}
+
+	values := []struct {
+		name  string
+		value float64
+	}{
+		{"open", m.Open},
+		{"close", m.Close},
+		{"high", m.High},
+		{"low", m.Low},
+		{"volume", m.Volume},
+		{"amount", m.Amount},
+	}
+	for _, field := range values {
+		if math.IsNaN(field.value) || math.IsInf(field.value, 0) {
+			return fmt.Errorf("%s must be finite, got %f", field.name, field.value)
+		}
+	}
+
 	// Validate logical constraints
 	if m.High < m.Low {
 		return fmt.Errorf("high (%f) must be >= low (%f)", m.High, m.Low)

@@ -26,6 +26,21 @@ func NewFunctionRegistry() *FunctionRegistry {
 	return reg
 }
 
+// Clone creates an independent copy of the registry.
+func (r *FunctionRegistry) Clone() *FunctionRegistry {
+	if r == nil {
+		return NewFunctionRegistry()
+	}
+
+	clone := &FunctionRegistry{
+		functions: make(map[string]Function, len(r.functions)),
+	}
+	for name, fn := range r.functions {
+		clone.functions[name] = fn
+	}
+	return clone
+}
+
 // Register registers a function
 func (r *FunctionRegistry) Register(name string, fn Function) {
 	r.functions[strings.ToUpper(name)] = fn

@@ -59,17 +59,35 @@ type outputDeclaration struct {
 
 // NewInterpreter creates a new Interpreter
 func NewInterpreter(marketData []*types.MarketData) *Interpreter {
+	return NewInterpreterWithRegistry(marketData, nil)
+}
+
+// NewInterpreterWithRegistry creates an Interpreter with a custom function registry.
+func NewInterpreterWithRegistry(marketData []*types.MarketData, functions *FunctionRegistry) *Interpreter {
 	return &Interpreter{
 		marketData: marketData,
 		variables:  make(map[string]*Value),
 		userVars:   make([]string, 0),
 		outputs:    make([]outputDeclaration, 0),
-		functions:  NewFunctionRegistry(),
+		functions:  functions.Clone(),
 	}
+}
+
+// RegisterFunction registers a function for subsequent executions.
+func (interp *Interpreter) RegisterFunction(name string, fn Function) {
+	if interp.functions == nil {
+		interp.functions = NewFunctionRegistry()
+	}
+	interp.functions.Register(name, fn)
 }
 
 // Execute executes a program and returns the result
 func (interp *Interpreter) Execute(program *ast.Program) (*types.FormulaResult, error) {
+	interp.resetExecutionState()
+	if err := interp.validateInputs(program); err != nil {
+		return nil, err
+	}
+
 	// Initialize market data variables
 	interp.initMarketDataVariables()
 
@@ -82,6 +100,32 @@ func (interp *Interpreter) Execute(program *ast.Program) (*types.FormulaResult, 
 
 	// Build result
 	return interp.buildResult(), nil
+}
+
+func (interp *Interpreter) resetExecutionState() {
+	if interp.variables == nil {
+		interp.variables = make(map[string]*Value)
+	} else {
+		clear(interp.variables)
+	}
+	interp.userVars = interp.userVars[:0]
+	interp.outputs = interp.outputs[:0]
+	interp.exprCount = 0
+}
+
+func (interp *Interpreter) validateInputs(program *ast.Program) error {
+	if program == nil {
+		return errors.NewRuntimeError("program must not be nil")
+	}
+	for i, data := range interp.marketData {
+		if data == nil {
+			return errors.NewRuntimeError(fmt.Sprintf("market data at index %d is nil", i))
+		}
+		if err := data.Validate(); err != nil {
+			return errors.NewRuntimeError(fmt.Sprintf("invalid market data at index %d: %v", i, err))
+		}
+	}
+	return nil
 }
 
 // initMarketDataVariables initializes built-in market data variables
@@ -241,12 +285,16 @@ func (interp *Interpreter) evaluateBinaryExpression(expr *ast.BinaryExpression) 
 	} else if right.IsArray {
 		return interp.binaryOpScalarArray(expr.Operator, left.Single, right.Array)
 	} else {
-		return interp.binaryOpScalarScalar(expr.Operator, left.Single, right.Single)
+		result, err := interp.binaryOpScalarScalar(expr.Operator, left.Single, right.Single)
+		if err != nil {
+			return nil, err
+		}
+		return NewSingleValue(result), nil
 	}
 }
 
 // binaryOpScalarScalar performs binary operation on two scalars
-func (interp *Interpreter) binaryOpScalarScalar(op ast.BinaryOperator, a, b float64) (*Value, error) {
+func (interp *Interpreter) binaryOpScalarScalar(op ast.BinaryOperator, a, b float64) (float64, error) {
 	var result float64
 	switch op {
 	case ast.OpPlus:
@@ -257,7 +305,7 @@ func (interp *Interpreter) binaryOpScalarScalar(op ast.BinaryOperator, a, b floa
 		result = a * b
 	case ast.OpDivide:
 		if b == 0 {
-			return nil, errors.NewRuntimeError("division by zero")
+			return 0, errors.NewRuntimeError("division by zero")
 		}
 		result = a / b
 	case ast.OpGreaterThan:
@@ -309,10 +357,10 @@ func (interp *Interpreter) binaryOpScalarScalar(op ast.BinaryOperator, a, b floa
 			result = 0
 		}
 	default:
-		return nil, errors.NewRuntimeError(fmt.Sprintf("unknown binary operator: %s", op))
+		return 0, errors.NewRuntimeError(fmt.Sprintf("unknown binary operator: %s", op))
 	}
 
-	return NewSingleValue(result), nil
+	return result, nil
 }
 
 // binaryOpArrayArray performs binary operation on two arrays
@@ -327,7 +375,7 @@ func (interp *Interpreter) binaryOpArrayArray(op ast.BinaryOperator, a, b []floa
 		if err != nil {
 			return nil, err
 		}
-		result[i] = val.Single
+		result[i] = val
 	}
 
 	return NewArrayValue(result), nil
@@ -341,7 +389,7 @@ func (interp *Interpreter) binaryOpArrayScalar(op ast.BinaryOperator, arr []floa
 		if err != nil {
 			return nil, err
 		}
-		result[i] = val.Single
+		result[i] = val
 	}
 	return NewArrayValue(result), nil
 }
@@ -354,7 +402,7 @@ func (interp *Interpreter) binaryOpScalarArray(op ast.BinaryOperator, scalar flo
 		if err != nil {
 			return nil, err
 		}
-		result[i] = val.Single
+		result[i] = val
 	}
 	return NewArrayValue(result), nil
 }

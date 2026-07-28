@@ -11,12 +11,25 @@ import (
 
 // FormulaEngine is the main engine for compiling and executing formulas
 type FormulaEngine struct {
-	// You can add caching or other optimization features here
+	functions *interpreter.FunctionRegistry
 }
 
 // NewFormulaEngine creates a new formula engine
 func NewFormulaEngine() *FormulaEngine {
-	return &FormulaEngine{}
+	return NewFormulaEngineWithRegistry(nil)
+}
+
+// NewFormulaEngineWithRegistry creates an engine with a custom function registry.
+func NewFormulaEngineWithRegistry(functions *interpreter.FunctionRegistry) *FormulaEngine {
+	return &FormulaEngine{functions: functions.Clone()}
+}
+
+// RegisterFunction registers a function for subsequent executions.
+func (e *FormulaEngine) RegisterFunction(name string, fn interpreter.Function) {
+	if e.functions == nil {
+		e.functions = interpreter.NewFunctionRegistry()
+	}
+	e.functions.Register(name, fn)
 }
 
 // Compile compiles a formula string into an AST
@@ -40,7 +53,7 @@ func (e *FormulaEngine) Compile(formula string) (*ast.Program, error) {
 
 // Execute executes a compiled program with market data
 func (e *FormulaEngine) Execute(program *ast.Program, marketData []*types.MarketData) (*types.FormulaResult, error) {
-	interp := interpreter.NewInterpreter(marketData)
+	interp := interpreter.NewInterpreterWithRegistry(marketData, e.functions)
 	return interp.Execute(program)
 }
 
