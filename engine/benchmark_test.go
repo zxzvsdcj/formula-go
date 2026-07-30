@@ -10,6 +10,9 @@ import (
 
 var benchmarkResult *types.FormulaResult
 var benchmarkProgram *ast.Program
+var benchmarkStreamingResult *types.StreamingResult
+var benchmarkStreamingResults []*types.StreamingResult
+var benchmarkStreamingLen int
 
 const benchmarkMACDFormula = `
 	EMA12 := EMA(CLOSE, 12)
@@ -94,6 +97,97 @@ func BenchmarkRunDrawingEvents(b *testing.B) {
 	}
 }
 
+func BenchmarkStreamingSeedMACD(b *testing.B) {
+	for _, size := range []int{1000, 10000} {
+		b.Run(fmt.Sprintf("%dBars", size), func(b *testing.B) {
+			engine := NewFormulaEngine()
+			program, err := engine.Compile(benchmarkMACDFormula)
+			if err != nil {
+				b.Fatal(err)
+			}
+			data := createBenchmarkMarketData(size)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				session, err := engine.NewStreamingSession(program, data)
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkStreamingLen = session.Len()
+			}
+		})
+	}
+}
+
+func BenchmarkStreamingInitialBulkMACD(b *testing.B) {
+	for _, size := range []int{1000, 10000} {
+		b.Run(fmt.Sprintf("%dBars", size), func(b *testing.B) {
+			engine := NewFormulaEngine()
+			program, err := engine.Compile(benchmarkMACDFormula)
+			if err != nil {
+				b.Fatal(err)
+			}
+			data := createBenchmarkMarketData(size)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				session, err := engine.NewStreamingSession(program, nil)
+				if err != nil {
+					b.Fatal(err)
+				}
+				benchmarkStreamingResults, err = session.AppendMany(data)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkStreamingSteadyAppendMACD(b *testing.B) {
+	for _, size := range []int{1000, 10000} {
+		b.Run(fmt.Sprintf("%dBars", size), func(b *testing.B) {
+			engine := NewFormulaEngine()
+			session, err := engine.NewStreamingSessionFromSource(benchmarkMACDFormula, createBenchmarkMarketData(size))
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := range b.N {
+				benchmarkStreamingResult, err = session.Append(createBenchmarkMarketDataBar(size + i))
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkStreamingRepeatedUpdateMACD(b *testing.B) {
+	for _, size := range []int{1000, 10000} {
+		b.Run(fmt.Sprintf("%dBars", size), func(b *testing.B) {
+			engine := NewFormulaEngine()
+			session, err := engine.NewStreamingSessionFromSource(benchmarkMACDFormula, createBenchmarkMarketData(size))
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := range b.N {
+				benchmarkStreamingResult, err = session.UpdateCurrent(createBenchmarkMarketDataBar(size + i))
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func benchmarkRunFormula(b *testing.B, formula string, marketData []*types.MarketData) {
 	b.Helper()
 	engine := NewFormulaEngine()
@@ -144,6 +238,16 @@ func createBenchmarkMarketData(count int) []*types.MarketData {
 		data[i] = types.NewMarketData(open, close, high, low, volume, amount)
 	}
 	return data
+}
+
+func createBenchmarkMarketDataBar(i int) *types.MarketData {
+	open := 100.0 + float64(i%200)*0.3 + float64(i/200)*0.05
+	close := open + float64((i%7)-3)*0.4
+	high := maxFloat(open, close) + 1.5 + float64(i%5)*0.1
+	low := minFloat(open, close) - 1.5 - float64(i%3)*0.1
+	volume := 1000.0 + float64((i*37)%1000)
+	amount := close * volume
+	return types.NewMarketData(open, close, high, low, volume, amount)
 }
 
 func maxFloat(a, b float64) float64 {

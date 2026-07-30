@@ -14,15 +14,31 @@ type Function func(args []*Value, marketData []*types.MarketData) (*Value, error
 
 // FunctionRegistry manages built-in functions
 type FunctionRegistry struct {
-	functions map[string]Function
+	functions          map[string]Function
+	streamingFunctions map[string]streamingFunctionMetadata
+}
+
+type streamingWarmupKind uint8
+
+const (
+	streamingWarmupNone streamingWarmupKind = iota
+	streamingWarmupSingleSeries
+	streamingWarmupPairSeries
+)
+
+type streamingFunctionMetadata struct {
+	warmup          streamingWarmupKind
+	futureReference bool
 }
 
 // NewFunctionRegistry creates a new function registry
 func NewFunctionRegistry() *FunctionRegistry {
 	reg := &FunctionRegistry{
-		functions: make(map[string]Function),
+		functions:          make(map[string]Function),
+		streamingFunctions: make(map[string]streamingFunctionMetadata),
 	}
 	reg.registerBuiltinFunctions()
+	reg.registerBuiltinStreamingMetadata()
 	return reg
 }
 
@@ -33,17 +49,38 @@ func (r *FunctionRegistry) Clone() *FunctionRegistry {
 	}
 
 	clone := &FunctionRegistry{
-		functions: make(map[string]Function, len(r.functions)),
+		functions:          make(map[string]Function, len(r.functions)),
+		streamingFunctions: make(map[string]streamingFunctionMetadata, len(r.streamingFunctions)),
 	}
 	for name, fn := range r.functions {
 		clone.functions[name] = fn
+	}
+	for name, metadata := range r.streamingFunctions {
+		clone.streamingFunctions[name] = metadata
 	}
 	return clone
 }
 
 // Register registers a function
 func (r *FunctionRegistry) Register(name string, fn Function) {
-	r.functions[strings.ToUpper(name)] = fn
+	if r.functions == nil {
+		r.functions = make(map[string]Function)
+	}
+	if r.streamingFunctions == nil {
+		r.streamingFunctions = make(map[string]streamingFunctionMetadata)
+	}
+	upper := strings.ToUpper(name)
+	r.functions[upper] = fn
+	delete(r.streamingFunctions, upper)
+}
+
+// IsStreamingFutureReference reports whether the currently registered function
+// uses future data and therefore cannot run in a streaming session.
+func (r *FunctionRegistry) IsStreamingFutureReference(name string) bool {
+	if r == nil {
+		return false
+	}
+	return r.streamingFunctions[strings.ToUpper(name)].futureReference
 }
 
 // Names returns all registered function names in sorted uppercase order.
@@ -161,4 +198,20 @@ func (r *FunctionRegistry) registerBuiltinFunctions() {
 	r.Register("POLYLINE", fnPOLYLINE)
 	r.Register("DRAWBAND", fnDRAWBAND)
 	r.Register("DRAWKLINE", fnDRAWKLINE)
+}
+
+func (r *FunctionRegistry) registerBuiltinStreamingMetadata() {
+	for _, name := range []string{
+		"MA", "EMA", "SUM", "HHV", "LLV", "STD", "STDP", "VAR", "VARP", "WMA",
+		"COUNT", "EVERY", "EXIST", "HHVBARS", "LLVBARS", "AVEDEV", "DEVSQ", "FORCAST",
+		"SLOPE", "STDDEV", "FILTER", "UPNDAY", "DOWNNDAY", "SMA",
+	} {
+		r.streamingFunctions[name] = streamingFunctionMetadata{warmup: streamingWarmupSingleSeries}
+	}
+	for _, name := range []string{"COVAR", "RELATE", "BETA", "LONGCROSS", "NDAY"} {
+		r.streamingFunctions[name] = streamingFunctionMetadata{warmup: streamingWarmupPairSeries}
+	}
+	for _, name := range []string{"REFX", "REFXV"} {
+		r.streamingFunctions[name] = streamingFunctionMetadata{futureReference: true}
+	}
 }

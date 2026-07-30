@@ -359,6 +359,7 @@ formula-go/
 │       └── nodes.go
 ├── examples/           # 示例程序
 │   ├── helpers/        # TDX 数据转换辅助
+│   ├── streaming/      # 流式 append/update 与绘图 delta demo
 │   └── tdx_resistance_support/ # 真实行情阻力/支撑 demo
 ├── types/              # 类型定义
 │   ├── market_data.go  # 市场数据
@@ -428,7 +429,76 @@ func (e *FormulaEngine) Execute(program *Program, marketData []*MarketData) (*Fo
 
 // 一步编译并执行
 func (e *FormulaEngine) Run(formula string, marketData []*MarketData) (*FormulaResult, error)
+
+// 创建流式执行 session；seed 会被复制并用流式 warm-up 语义预热
+func (e *FormulaEngine) NewStreamingSession(program *Program, seed []*MarketData) (*StreamingSession, error)
+
+// 一步编译公式并创建流式执行 session
+func (e *FormulaEngine) NewStreamingSessionFromSource(formula string, seed []*MarketData) (*StreamingSession, error)
 ```
+
+
+### StreamingSession
+
+`StreamingSession` 适用于调用方明确区分新增完成 bar 和替换当前未完成 bar 的实时行情场景。session 拥有内部历史副本；`Append`、`AppendMany`、`UpdateCurrent` 和 `History` 都不会暴露内部 `MarketData` 指针。session 持有编译程序的私有快照，创建后修改调用方的 AST 不会改变 session 行为。
+
+当前实现以结果正确性为优先，每次 `Append` 或 `UpdateCurrent` 都会重新计算完整历史，单次 mutation 的时间和空间开销随保留历史长度线性增长；`AppendMany` 会逐个前缀执行，开销随历史长度和输入批次大小一起增长。大批量初始化应优先通过 `seed` 完成。`StreamingSession` 的所有方法都不支持与 mutation 并发调用，调用方需要自行同步。
+
+```go
+type StreamingSession struct {}
+
+// 当前保留的 bar 数量
+func (s *StreamingSession) Len() int
+
+// 返回历史数据的深拷贝快照
+func (s *StreamingSession) History() []*MarketData
+
+// 新增一个已开始/已完成 bar，历史长度加一
+func (s *StreamingSession) Append(data *MarketData) (*StreamingResult, error)
+
+// 按输入顺序原子新增多个 bar，返回每个前缀状态的 latest-bar 结果
+func (s *StreamingSession) AppendMany(data []*MarketData) ([]*StreamingResult, error)
+
+// 替换当前未完成 bar，不增加历史长度；空 session 会返回错误
+func (s *StreamingSession) UpdateCurrent(data *MarketData) (*StreamingResult, error)
+```
+
+`AppendMany(nil)` 和 `AppendMany([]*MarketData{})` 是 no-op，返回空结果且不改变 session。任一输入校验或公式执行失败时，session 历史和绘图状态保持为调用前状态；该原子性覆盖库拥有的状态，不回滚自定义函数闭包对外部对象产生的副作用。用于 streaming 的自定义函数应保持确定性且避免副作用。
+
+```go
+type StreamingResult struct {
+    BarIndex  int
+    Outputs   []*LatestOutput
+    Variables map[string]float64
+    Drawings  []*DrawingChange
+}
+
+type LatestOutput struct {
+    Name  string
+    Value float64
+    Style *LineStyle
+}
+
+type DrawingChange struct {
+    Action DrawingChangeAction // DrawingAdd, DrawingReplace, DrawingRemove
+    Key    string
+    Event  *DrawingEvent
+}
+```
+
+Streaming mutation responses只包含当前 mutation 的 latest-bar 数值和绘图 delta，不返回完整历史 `FormulaResult`。内部可以为正确性重新计算完整数组，但 public result 不携带历史数组。带 `:` 的声明始终进入 `Outputs`（包括标量声明）；未带 `:` 的标量变量进入 `Variables`。
+
+流式 warm-up 仅在 streaming 路径生效：当正数周期大于当前历史长度时，受影响的 latest 数值返回 `math.NaN()`，bar 仍提交；零、负数、非标量周期和其他参数错误仍返回错误。batch `Run`/`Execute` 的短历史错误行为不变。
+
+`REFX`、`REFXV` 这类未来引用函数会在创建 streaming session 时被拒绝。`TOTALBARSCOUNT`、`CURRBARSCOUNT`、`ISLASTBAR`、`BARSTATUS`、`CONST` 等非因果函数仍按每次 mutation 的当前最新状态计算；调用方不应假设把每次 latest delta 累积起来即可还原这些函数的完整 batch 历史。
+
+完整的 `Append`、`UpdateCurrent` 和绘图 delta 示例：
+
+```bash
+cd examples
+go run ./streaming
+```
+
 
 ### 自定义函数
 

@@ -44,16 +44,21 @@ type (
 
 // Export types for external use
 type (
-	MarketData    = types.MarketData
-	FormulaResult = types.FormulaResult
-	OutputLine    = types.OutputLine
-	LineStyle     = types.LineStyle
-	DrawingEvent  = types.DrawingEvent
+	MarketData          = types.MarketData
+	FormulaResult       = types.FormulaResult
+	OutputLine          = types.OutputLine
+	LineStyle           = types.LineStyle
+	DrawingEvent        = types.DrawingEvent
+	LatestOutput        = types.LatestOutput
+	DrawingChange       = types.DrawingChange
+	DrawingChangeAction = types.DrawingChangeAction
+	StreamingResult     = types.StreamingResult
 )
 
 // Export engine types
 type (
-	FormulaEngine = engine.FormulaEngine
+	FormulaEngine    = engine.FormulaEngine
+	StreamingSession = engine.StreamingSession
 )
 
 // Export interpreter types
@@ -62,6 +67,13 @@ type (
 	Function         = interpreter.Function
 	Interpreter      = interpreter.Interpreter
 	FunctionRegistry = interpreter.FunctionRegistry
+)
+
+// Export drawing change constants
+const (
+	DrawingAdd     = types.DrawingAdd
+	DrawingReplace = types.DrawingReplace
+	DrawingRemove  = types.DrawingRemove
 )
 
 // Constructor functions

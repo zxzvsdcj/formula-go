@@ -49,6 +49,7 @@ type Interpreter struct {
 	outputs    []outputDeclaration
 	functions  *FunctionRegistry
 	exprCount  int
+	streaming  bool
 }
 
 type outputDeclaration struct {
@@ -438,6 +439,12 @@ func (interp *Interpreter) evaluateFunctionCall(call *ast.FunctionCall) (*Value,
 			return nil, err
 		}
 		args[i] = val
+	}
+
+	if interp.streaming {
+		if value, ok := interp.functions.streamingWarmupValue(call.Name, args, len(interp.marketData)); ok {
+			return value, nil
+		}
 	}
 
 	// Call function
