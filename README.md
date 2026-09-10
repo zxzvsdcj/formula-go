@@ -390,20 +390,24 @@ go tool cover -html=coverage.out
 测试约束：
 - `engine/builtin_registry_test.go` 会校验注册表中的每个内置函数都有覆盖用例。
 - `engine/builtin_boundaries_test.go` 会校验每个注册函数的参数个数错误，并覆盖常见参数边界、类型错误和 NaN 传播规则。
-- `engine/readme_examples_test.go` 会抽取 README 中的公式示例并执行，避免文档示例漂移。
+- `engine/readme_examples_test.go` 会抽取 README 中的公式示例并执行，并检查每条数值输出至少包含一个有限值，避免全 NaN 的指标误通过。
+- `engine/semantics_regression_test.go` 核对 KDJ、嵌套均线的预期数值，以及 NaN 恢复、真值和数值类型边界。
+- `engine/streaming_bulk_test.go` 对比批量追加与逐条完整重算的每个前缀结果，并覆盖后续更新、失败回滚和自定义函数调用次数。
+- `engine/incremental_test.go` 对比增量路径与完整重算的混合追加和连续更新，覆盖状态回滚、结果隔离；`interpreter/incremental_test.go` 检查缓存上限和初始化失败恢复。
 - README 的内置函数清单会和 `interpreter.FunctionRegistry.Names()` 自动比对。
 - 新增函数如果只注册、不补精准用例、参数边界或 README 清单，`go test ./...` 会失败。
 
-说明：`interpreter` 包的函数主要通过 `engine` 集成测试覆盖；`go test ./... -cover` 会按包独立统计，因此 `interpreter` 会显示为无直接测试文件。
+说明：`interpreter` 包的函数主要通过 `engine` 集成测试覆盖；统计跨包合并覆盖率可使用 `go test ./... -coverpkg=./... -coverprofile=coverage.out`，再运行 `go tool cover -func=coverage.out`。
 
 ### 函数边界和 NaN 语义
 
 当前测试已固定以下核心规则：
-- 周期类函数要求周期参数为标量，并按函数语义校验正数、非负数或不超过数据长度。
+- 周期、历史偏移、SMA 权重和 ROUND2 位数要求可表示为 Go `int` 的有限整数标量；拒绝字符串、绘图值、小数、NaN、无穷和溢出值，并按函数语义校验正数、非负数或不超过数据长度。
 - 数值函数和绘图事件函数会拒绝不匹配的字符串参数或数组/标量参数形态。
 - `DRAWNULL()` 返回 `NaN`，可用于断线或隐藏。
-- 普通算术会传播 `NaN`；滚动窗口函数在窗口内存在 `NaN` 时输出 `NaN`。
-- 条件判断中 `0` 和 `NaN` 视为 false，其他数值视为 true。
+- 数值运算拒绝字符串和绘图值，普通算术会传播 `NaN`；MA、SUM、统计和极值窗口在窗口内存在 `NaN` 时输出 `NaN`，NaN 离开窗口后恢复。HHVBARS、LLVBARS 遵循相同规则，相同极值取最近一根 bar。
+- EMA、三参数 SMA 和 DMA 使用首次有效输入初始化。中途遇到 NaN 时输出 NaN，并保留上一有效递推状态；下一有效输入继续递推。DMA 的 alpha 为 NaN 时同样输出缺口并保留状态。
+- 条件判断（包括 AND、OR、IF、IFF、IFN、NOT 和条件统计函数）中 `0` 和 `NaN` 视为 false，其他数值视为 true。
 
 ## API 文档
 
@@ -442,7 +446,17 @@ func (e *FormulaEngine) NewStreamingSessionFromSource(formula string, seed []*Ma
 
 `StreamingSession` 适用于调用方明确区分新增完成 bar 和替换当前未完成 bar 的实时行情场景。session 拥有内部历史副本；`Append`、`AppendMany`、`UpdateCurrent` 和 `History` 都不会暴露内部 `MarketData` 指针。session 持有编译程序的私有快照，创建后修改调用方的 AST 不会改变 session 行为。
 
-当前实现以结果正确性为优先，每次 `Append` 或 `UpdateCurrent` 都会重新计算完整历史，单次 mutation 的时间和空间开销随保留历史长度线性增长；`AppendMany` 会逐个前缀执行，开销随历史长度和输入批次大小一起增长。大批量初始化应优先通过 `seed` 完成。`StreamingSession` 的所有方法都不支持与 mutation 并发调用，调用方需要自行同步。
+流式会话会自动选择执行路径，无需修改调用方式：
+
+- **增量执行**：当整个公式的节点均受支持时，完成预热后为每个节点保留窗口和递推状态。`Append` 只计算新增 bar；`UpdateCurrent` 从当前 bar 之前的状态计算，再替换当前贡献。所有节点成功后才提交，连续更新和失败重试不会重复累加。
+- **批量执行**：尚不支持增量、但预热后历史值保持稳定的内置数值公式，`AppendMany` 可一次计算后提取各个前缀结果。
+- **完整重算**：包含自定义函数（包括覆盖内置函数）、绘图、非因果函数、无法静态解析的周期或其他未支持节点时，单根更新保留完整重算路径。
+
+当前增量覆盖：算术、比较和逻辑运算，逐点数学函数，IF/IFF/IFN/NOT/BETWEEN/RANGE/DRAWNULL，EMA/SMA/DMA，MA/SUM，REF/REFV/CROSS，COUNT/EVERY/EXIST，HHV/LLV/HHVBARS/LLVBARS，以及 STD/STDP/STDDEV/VAR/VARP/DEVSQ/FORCAST/SLOPE/AVEDEV/WMA/COVAR/RELATE/BETA。其他函数如 BARSLAST 暂时回退；增加一个未支持节点会让整个公式回退。
+
+EMA、递推 SMA、DMA、MA、SUM、REF、CROSS 和条件统计的单节点计算为 O(1)；极值和其他统计窗口的单节点增量计算为 O(P)，P 为窗口长度，均无需扫描完整历史。指标缓存按各节点所需回看长度保留。会话仍保留完整行情供 `History()` 使用，因此行情存储为 O(N)；`Append` 的历史切片扩容有摊销成本，`UpdateCurrent` 不复制历史。
+
+预热期间保留原有流式语义，达到所需长度时一次性建立增量状态。增量会话的 `AppendMany` 会复制指标状态处理整个批次，任何失败都不提交状态和历史。仅需初始化、不需要每个前缀的返回值时，优先使用 `seed`。`StreamingSession` 的所有方法都不支持与 mutation 并发调用，调用方需要自行同步。
 
 ```go
 type StreamingSession struct {}
@@ -600,6 +614,12 @@ type DrawingEvent struct {
 
 ```bash
 go test ./engine -bench=. -benchmem
+```
+
+增量更新与完整重算的性能对照（1,000 / 10,000 / 100,000 根历史）：
+
+```bash
+go test ./engine -run '^$' -bench 'BenchmarkStreamingUpdateComparison$' -benchtime=100x -benchmem
 ```
 
 当前覆盖场景：

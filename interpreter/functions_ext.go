@@ -19,11 +19,11 @@ func fnSTD(args []*Value, _ []*types.MarketData) (*Value, error) {
 	data := args[0]
 	period := args[1]
 
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError("STD first argument must be an array")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("STD second argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("STD second argument must be a number (finite integer)")
 	}
 
 	n := int(period.Single)
@@ -70,11 +70,11 @@ func fnVAR(args []*Value, _ []*types.MarketData) (*Value, error) {
 	data := args[0]
 	period := args[1]
 
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError("VAR first argument must be an array")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("VAR second argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("VAR second argument must be a number (finite integer)")
 	}
 
 	n := int(period.Single)
@@ -124,14 +124,14 @@ func fnSMA(args []*Value, data []*types.MarketData) (*Value, error) {
 	period := args[1]
 	weight := args[2]
 
-	if !source.IsArray {
+	if !isNumericArray(source) {
 		return nil, errors.NewRuntimeError("SMA first argument must be an array")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("SMA second argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("SMA second argument must be a number (finite integer)")
 	}
-	if weight.IsArray {
-		return nil, errors.NewRuntimeError("SMA third argument must be a number")
+	if !isIntegerScalar(weight) {
+		return nil, errors.NewRuntimeError("SMA third argument must be a number (finite integer)")
 	}
 
 	n := int(period.Single)
@@ -142,15 +142,8 @@ func fnSMA(args []*Value, data []*types.MarketData) (*Value, error) {
 	if m <= 0 || m > n {
 		return nil, errors.NewRuntimeError("SMA weight must be between 1 and period")
 	}
-	if len(source.Array) == 0 {
-		return NewArrayValue([]float64{}), nil
-	}
-
-	result := make([]float64, len(source.Array))
-	result[0] = source.Array[0]
-	for i := 1; i < len(source.Array); i++ {
-		result[i] = (float64(m)*source.Array[i] + float64(n-m)*result[i-1]) / float64(n)
-	}
+	alpha := float64(m) / float64(n)
+	result := recursiveAverage(source.Array, func(int) float64 { return alpha })
 
 	return NewArrayValue(result), nil
 }
@@ -164,11 +157,11 @@ func fnWMA(args []*Value, _ []*types.MarketData) (*Value, error) {
 	data := args[0]
 	period := args[1]
 
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError("WMA first argument must be an array")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("WMA second argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("WMA second argument must be a number (finite integer)")
 	}
 
 	n := int(period.Single)
@@ -208,11 +201,11 @@ func fnCOUNT(args []*Value, _ []*types.MarketData) (*Value, error) {
 	condition := args[0]
 	period := args[1]
 
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("COUNT first argument must be an array")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("COUNT second argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("COUNT second argument must be a number (finite integer)")
 	}
 
 	n := int(period.Single)
@@ -250,11 +243,11 @@ func fnEVERY(args []*Value, _ []*types.MarketData) (*Value, error) {
 	condition := args[0]
 	period := args[1]
 
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("EVERY first argument must be an array")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("EVERY second argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("EVERY second argument must be a number (finite integer)")
 	}
 
 	n := int(period.Single)
@@ -297,11 +290,11 @@ func fnEXIST(args []*Value, _ []*types.MarketData) (*Value, error) {
 	condition := args[0]
 	period := args[1]
 
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("EXIST first argument must be an array")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("EXIST second argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("EXIST second argument must be a number (finite integer)")
 	}
 
 	n := int(period.Single)
@@ -343,7 +336,7 @@ func fnBARSLAST(args []*Value, _ []*types.MarketData) (*Value, error) {
 
 	condition := args[0]
 
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("BARSLAST argument must be an array")
 	}
 
@@ -366,84 +359,12 @@ func fnBARSLAST(args []*Value, _ []*types.MarketData) (*Value, error) {
 
 // fnHHVBARS implements HHVBARS(data, period) - bars since the highest value in the window.
 func fnHHVBARS(args []*Value, _ []*types.MarketData) (*Value, error) {
-	if len(args) != 2 {
-		return nil, errors.NewRuntimeError("HHVBARS requires 2 arguments")
-	}
-
-	data := args[0]
-	period := args[1]
-
-	if !data.IsArray {
-		return nil, errors.NewRuntimeError("HHVBARS first argument must be an array")
-	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("HHVBARS second argument must be a number")
-	}
-
-	n := int(period.Single)
-	if n <= 0 || n > len(data.Array) {
-		return nil, errors.NewRuntimeError(fmt.Sprintf("HHVBARS period must be between 1 and %d", len(data.Array)))
-	}
-
-	result := make([]float64, len(data.Array))
-	for i := 0; i < n-1; i++ {
-		result[i] = math.NaN()
-	}
-
-	for i := n - 1; i < len(data.Array); i++ {
-		maxValue := data.Array[i]
-		bars := 0
-		for j := 1; j < n; j++ {
-			if data.Array[i-j] > maxValue {
-				maxValue = data.Array[i-j]
-				bars = j
-			}
-		}
-		result[i] = float64(bars)
-	}
-
-	return NewArrayValue(result), nil
+	return rollingExtrema(args, "HHVBARS", true, true)
 }
 
 // fnLLVBARS implements LLVBARS(data, period) - bars since the lowest value in the window.
 func fnLLVBARS(args []*Value, _ []*types.MarketData) (*Value, error) {
-	if len(args) != 2 {
-		return nil, errors.NewRuntimeError("LLVBARS requires 2 arguments")
-	}
-
-	data := args[0]
-	period := args[1]
-
-	if !data.IsArray {
-		return nil, errors.NewRuntimeError("LLVBARS first argument must be an array")
-	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("LLVBARS second argument must be a number")
-	}
-
-	n := int(period.Single)
-	if n <= 0 || n > len(data.Array) {
-		return nil, errors.NewRuntimeError(fmt.Sprintf("LLVBARS period must be between 1 and %d", len(data.Array)))
-	}
-
-	result := make([]float64, len(data.Array))
-	for i := 0; i < n-1; i++ {
-		result[i] = math.NaN()
-	}
-
-	for i := n - 1; i < len(data.Array); i++ {
-		minValue := data.Array[i]
-		bars := 0
-		for j := 1; j < n; j++ {
-			if data.Array[i-j] < minValue {
-				minValue = data.Array[i-j]
-				bars = j
-			}
-		}
-		result[i] = float64(bars)
-	}
-
-	return NewArrayValue(result), nil
+	return rollingExtrema(args, "LLVBARS", false, true)
 }
 
 // fnBARSCOUNT implements BARSCOUNT(data) - count of valid bars seen so far.
@@ -453,7 +374,7 @@ func fnBARSCOUNT(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	data := args[0]
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError("BARSCOUNT argument must be an array")
 	}
 
@@ -476,7 +397,7 @@ func fnBARSSINCE(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	condition := args[0]
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("BARSSINCE argument must be an array")
 	}
 
@@ -505,7 +426,7 @@ func fnBARSLASTCOUNT(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	condition := args[0]
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("BARSLASTCOUNT argument must be an array")
 	}
 
@@ -532,11 +453,11 @@ func fnAVEDEV(args []*Value, _ []*types.MarketData) (*Value, error) {
 	data := args[0]
 	period := args[1]
 
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError("AVEDEV first argument must be an array")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("AVEDEV second argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("AVEDEV second argument must be a number (finite integer)")
 	}
 
 	n := int(period.Single)
@@ -580,11 +501,11 @@ func fnFILTER(args []*Value, _ []*types.MarketData) (*Value, error) {
 	condition := args[0]
 	period := args[1]
 
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("FILTER first argument must be an array")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("FILTER second argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("FILTER second argument must be a number (finite integer)")
 	}
 
 	n := int(period.Single)
@@ -593,10 +514,10 @@ func fnFILTER(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	result := make([]float64, len(condition.Array))
-	lastSignal := -n - 1 // Initialize to allow first signal
+	lastSignal := -1
 
 	for i := 0; i < len(condition.Array); i++ {
-		if isTruthy(condition.Array[i]) && (i-lastSignal) >= n {
+		if isTruthy(condition.Array[i]) && (lastSignal < 0 || i-lastSignal >= n) {
 			result[i] = 1
 			lastSignal = i
 		} else {
@@ -616,6 +537,9 @@ func fnBETWEEN(args []*Value, _ []*types.MarketData) (*Value, error) {
 	value := args[0]
 	lower := args[1]
 	upper := args[2]
+	if !isNumeric(value) || !isNumeric(lower) || !isNumeric(upper) {
+		return nil, errors.NewRuntimeError("BETWEEN arguments must be numeric")
+	}
 
 	// Handle scalar case
 	if !value.IsArray && !lower.IsArray && !upper.IsArray {
@@ -628,6 +552,9 @@ func fnBETWEEN(args []*Value, _ []*types.MarketData) (*Value, error) {
 	// Handle array case
 	if !value.IsArray {
 		return nil, errors.NewRuntimeError("BETWEEN: value must be array when using array bounds")
+	}
+	if (lower.IsArray && len(lower.Array) != len(value.Array)) || (upper.IsArray && len(upper.Array) != len(value.Array)) {
+		return nil, errors.NewRuntimeError("BETWEEN: array length mismatch")
 	}
 
 	result := make([]float64, len(value.Array))
@@ -666,6 +593,9 @@ func fnNOT(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	value := args[0]
+	if !isNumeric(value) {
+		return nil, errors.NewRuntimeError("NOT argument must be numeric")
+	}
 	if !value.IsArray {
 		if isTruthy(value.Single) {
 			return NewSingleValue(0), nil
@@ -765,8 +695,8 @@ func fnROUND2(args []*Value, _ []*types.MarketData) (*Value, error) {
 	if len(args) != 2 {
 		return nil, errors.NewRuntimeError("ROUND2 requires 2 arguments")
 	}
-	if args[1].IsArray {
-		return nil, errors.NewRuntimeError("ROUND2 second argument must be a number")
+	if !isIntegerScalar(args[1]) {
+		return nil, errors.NewRuntimeError("ROUND2 second argument must be a number (finite integer)")
 	}
 
 	scale := math.Pow(10, args[1].Single)
@@ -825,11 +755,11 @@ func fnLONGCROSS(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	a, b, period := args[0], args[1], args[2]
-	if !a.IsArray || !b.IsArray {
+	if !isNumericArray(a) || !isNumericArray(b) {
 		return nil, errors.NewRuntimeError("LONGCROSS first two arguments must be arrays")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("LONGCROSS third argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("LONGCROSS third argument must be a number (finite integer)")
 	}
 	if len(a.Array) != len(b.Array) {
 		return nil, errors.NewRuntimeError("LONGCROSS: array length mismatch")
@@ -882,11 +812,11 @@ func fnNDAY(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	a, b, period := args[0], args[1], args[2]
-	if !a.IsArray || !b.IsArray {
+	if !isNumericArray(a) || !isNumericArray(b) {
 		return nil, errors.NewRuntimeError("NDAY first two arguments must be arrays")
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError("NDAY third argument must be a number")
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError("NDAY third argument must be a number (finite integer)")
 	}
 	if len(a.Array) != len(b.Array) {
 		return nil, errors.NewRuntimeError("NDAY: array length mismatch")
@@ -921,11 +851,11 @@ func fnLAST(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	condition, from, to := args[0], args[1], args[2]
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("LAST first argument must be an array")
 	}
-	if from.IsArray || to.IsArray {
-		return nil, errors.NewRuntimeError("LAST second and third arguments must be numbers")
+	if !isIntegerScalar(from) || !isIntegerScalar(to) {
+		return nil, errors.NewRuntimeError("LAST second and third arguments must be numbers (finite integer)")
 	}
 
 	fromN := int(from.Single)
@@ -960,11 +890,11 @@ func fnEXISTR(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	condition, from, to := args[0], args[1], args[2]
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("EXISTR first argument must be an array")
 	}
-	if from.IsArray || to.IsArray {
-		return nil, errors.NewRuntimeError("EXISTR second and third arguments must be numbers")
+	if !isIntegerScalar(from) || !isIntegerScalar(to) {
+		return nil, errors.NewRuntimeError("EXISTR second and third arguments must be numbers (finite integer)")
 	}
 
 	fromN := int(from.Single)
@@ -997,25 +927,16 @@ func fnDMA(args []*Value, _ []*types.MarketData) (*Value, error) {
 	data := args[0]
 	alpha := args[1]
 
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError("DMA first argument must be an array")
+	}
+	if !isNumeric(alpha) {
+		return nil, errors.NewRuntimeError("DMA second argument must be numeric")
 	}
 	if alpha.IsArray && len(alpha.Array) != len(data.Array) {
 		return nil, errors.NewRuntimeError("DMA: array length mismatch")
 	}
-	if len(data.Array) == 0 {
-		return NewArrayValue([]float64{}), nil
-	}
-
-	result := make([]float64, len(data.Array))
-	result[0] = data.Array[0]
-	for i := 1; i < len(data.Array); i++ {
-		a := alpha.Single
-		if alpha.IsArray {
-			a = alpha.Array[i]
-		}
-		result[i] = a*data.Array[i] + (1-a)*result[i-1]
-	}
+	result := recursiveAverage(data.Array, func(i int) float64 { return scalarOrArrayAt(alpha, i) })
 
 	return NewArrayValue(result), nil
 }
@@ -1027,6 +948,9 @@ func fnCONST(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	value := args[0]
+	if !isNumeric(value) {
+		return nil, errors.NewRuntimeError("CONST argument must be numeric")
+	}
 	if !value.IsArray {
 		return NewSingleValue(value.Single), nil
 	}
@@ -1052,8 +976,11 @@ func fnVALUEWHEN(args []*Value, _ []*types.MarketData) (*Value, error) {
 	condition := args[0]
 	value := args[1]
 
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("VALUEWHEN first argument must be an array")
+	}
+	if !isNumeric(value) {
+		return nil, errors.NewRuntimeError("VALUEWHEN second argument must be numeric")
 	}
 	if value.IsArray && len(value.Array) != len(condition.Array) {
 		return nil, errors.NewRuntimeError("VALUEWHEN: array length mismatch")
@@ -1260,10 +1187,10 @@ func fnSUMBARS(args []*Value, _ []*types.MarketData) (*Value, error) {
 
 	data := args[0]
 	target := args[1]
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError("SUMBARS first argument must be an array")
 	}
-	if target.IsArray {
+	if !isNumericScalar(target) {
 		return nil, errors.NewRuntimeError("SUMBARS second argument must be a number")
 	}
 
@@ -1315,7 +1242,7 @@ func fnSTICKLINE(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	condition, price1, price2, width, empty := args[0], args[1], args[2], args[3], args[4]
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError("STICKLINE first argument must be an array")
 	}
 	if err := validateDrawingNumericArgs("STICKLINE", len(condition.Array), price1, price2, width, empty); err != nil {
@@ -1349,10 +1276,10 @@ func fnDRAWLINE(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	cond1, price1, cond2, price2, expand := args[0], args[1], args[2], args[3], args[4]
-	if !cond1.IsArray {
+	if !isNumericArray(cond1) {
 		return nil, errors.NewRuntimeError("DRAWLINE first argument must be an array")
 	}
-	if !cond2.IsArray {
+	if !isNumericArray(cond2) {
 		return nil, errors.NewRuntimeError("DRAWLINE third argument must be an array")
 	}
 	if len(cond1.Array) != len(cond2.Array) {
@@ -1460,7 +1387,7 @@ func fnDRAWKLINE(args []*Value, _ []*types.MarketData) (*Value, error) {
 }
 
 func buildPointDrawings(function string, condition, price, numeric *Value, text *Value, priceKey string) (*Value, error) {
-	if !condition.IsArray {
+	if !isNumericArray(condition) {
 		return nil, errors.NewRuntimeError(fmt.Sprintf("%s first argument must be an array", function))
 	}
 	if err := validateDrawingNumericArgs(function, len(condition.Array), price); err != nil {
@@ -1566,7 +1493,7 @@ func numericUnaryFunc(args []*Value, name string, fn func(float64) float64) (*Va
 		return nil, errors.NewRuntimeError(fmt.Sprintf("%s requires 1 argument", name))
 	}
 	value := args[0]
-	if value.IsString || value.IsDraw {
+	if !isNumeric(value) {
 		return nil, errors.NewRuntimeError(fmt.Sprintf("%s argument must be numeric", name))
 	}
 	if !value.IsArray {
@@ -1586,7 +1513,7 @@ func numericBinaryFunc(args []*Value, name string, fn func(float64, float64) flo
 	}
 
 	a, b := args[0], args[1]
-	if a.IsString || b.IsString || a.IsDraw || b.IsDraw {
+	if !isNumeric(a) || !isNumeric(b) {
 		return nil, errors.NewRuntimeError(fmt.Sprintf("%s arguments must be numeric", name))
 	}
 	if !a.IsArray && !b.IsArray {
@@ -1615,11 +1542,11 @@ func rollingStatsFunc(args []*Value, name string, fn func([]float64) float64) (*
 
 	data := args[0]
 	period := args[1]
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError(fmt.Sprintf("%s first argument must be an array", name))
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError(fmt.Sprintf("%s second argument must be a number", name))
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError(fmt.Sprintf("%s second argument must be a number (finite integer)", name))
 	}
 
 	n := int(period.Single)
@@ -1632,7 +1559,23 @@ func rollingStatsFunc(args []*Value, name string, fn func([]float64) float64) (*
 		result[i] = math.NaN()
 	}
 	window := make([]float64, n)
+	missing := 0
+	for _, value := range data.Array[:n-1] {
+		if math.IsNaN(value) {
+			missing++
+		}
+	}
 	for i := n - 1; i < len(data.Array); i++ {
+		if math.IsNaN(data.Array[i]) {
+			missing++
+		}
+		if i >= n && math.IsNaN(data.Array[i-n]) {
+			missing--
+		}
+		if missing > 0 {
+			result[i] = math.NaN()
+			continue
+		}
 		copy(window, data.Array[i-n+1:i+1])
 		result[i] = fn(window)
 	}
@@ -1652,14 +1595,14 @@ func rollingPairStatsFunc(args []*Value, name string, fn func([]float64, []float
 	}
 
 	a, b, period := args[0], args[1], args[2]
-	if !a.IsArray || !b.IsArray {
+	if !isNumericArray(a) || !isNumericArray(b) {
 		return nil, errors.NewRuntimeError(fmt.Sprintf("%s first two arguments must be arrays", name))
 	}
 	if len(a.Array) != len(b.Array) {
 		return nil, errors.NewRuntimeError(fmt.Sprintf("%s: array length mismatch", name))
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError(fmt.Sprintf("%s third argument must be a number", name))
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError(fmt.Sprintf("%s third argument must be a number (finite integer)", name))
 	}
 
 	n := int(period.Single)
@@ -1688,11 +1631,11 @@ func futureReference(args []*Value, name string) (*Value, error) {
 
 	data := args[0]
 	period := args[1]
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError(fmt.Sprintf("%s first argument must be an array", name))
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError(fmt.Sprintf("%s second argument must be a number", name))
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError(fmt.Sprintf("%s second argument must be a number (finite integer)", name))
 	}
 
 	n := int(period.Single)
@@ -1702,12 +1645,11 @@ func futureReference(args []*Value, name string) (*Value, error) {
 
 	result := make([]float64, len(data.Array))
 	for i := range data.Array {
-		futureIndex := i + n
-		if futureIndex >= len(data.Array) {
+		if n >= len(data.Array)-i {
 			result[i] = math.NaN()
 			continue
 		}
-		result[i] = data.Array[futureIndex]
+		result[i] = data.Array[i+n]
 	}
 	return NewArrayValue(result), nil
 }
@@ -1773,11 +1715,11 @@ func compareConsecutive(args []*Value, name string, cmp func(curr, prev float64)
 	data := args[0]
 	period := args[1]
 
-	if !data.IsArray {
+	if !isNumericArray(data) {
 		return nil, errors.NewRuntimeError(fmt.Sprintf("%s first argument must be an array", name))
 	}
-	if period.IsArray {
-		return nil, errors.NewRuntimeError(fmt.Sprintf("%s second argument must be a number", name))
+	if !isIntegerScalar(period) {
+		return nil, errors.NewRuntimeError(fmt.Sprintf("%s second argument must be a number (finite integer)", name))
 	}
 
 	n := int(period.Single)

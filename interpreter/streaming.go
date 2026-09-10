@@ -38,7 +38,10 @@ func (interp *Interpreter) ExecuteStreaming(program *ast.Program) (*StreamingExe
 }
 
 func (interp *Interpreter) buildStreamingExecution() *StreamingExecution {
-	barIndex := len(interp.marketData) - 1
+	return interp.buildStreamingExecutionAt(len(interp.marketData) - 1)
+}
+
+func (interp *Interpreter) buildStreamingExecutionAt(barIndex int) *StreamingExecution {
 	result := &types.StreamingResult{
 		BarIndex:  barIndex,
 		Outputs:   make([]*types.LatestOutput, 0),
@@ -137,7 +140,7 @@ func streamingWarmupSingleSeriesValue(args []*Value, historyLength int) (*Value,
 		return nil, false
 	}
 	series, period := args[0], args[1]
-	if series == nil || period == nil || !series.IsArray || period.IsArray || period.IsString || period.IsDraw {
+	if !isNumericArray(series) || !isIntegerScalar(period) {
 		return nil, false
 	}
 	n := int(period.Single)
@@ -152,7 +155,7 @@ func streamingWarmupPairSeriesValue(args []*Value, historyLength int) (*Value, b
 		return nil, false
 	}
 	left, right, period := args[0], args[1], args[2]
-	if left == nil || right == nil || period == nil || !left.IsArray || !right.IsArray || len(left.Array) != len(right.Array) || period.IsArray || period.IsString || period.IsDraw {
+	if !isNumericArray(left) || !isNumericArray(right) || len(left.Array) != len(right.Array) || !isIntegerScalar(period) {
 		return nil, false
 	}
 	n := int(period.Single)

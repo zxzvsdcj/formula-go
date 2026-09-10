@@ -278,6 +278,9 @@ func (interp *Interpreter) evaluateBinaryExpression(expr *ast.BinaryExpression) 
 		return nil, err
 	}
 
+	if !isNumeric(left) || !isNumeric(right) {
+		return nil, errors.NewRuntimeError(fmt.Sprintf("operator %s requires numeric operands", expr.Operator))
+	}
 	// Handle array operations
 	if left.IsArray && right.IsArray {
 		return interp.binaryOpArrayArray(expr.Operator, left.Array, right.Array)
@@ -346,13 +349,13 @@ func (interp *Interpreter) binaryOpScalarScalar(op ast.BinaryOperator, a, b floa
 			result = 0
 		}
 	case ast.OpAnd:
-		if a != 0 && b != 0 {
+		if isTruthy(a) && isTruthy(b) {
 			result = 1
 		} else {
 			result = 0
 		}
 	case ast.OpOr:
-		if a != 0 || b != 0 {
+		if isTruthy(a) || isTruthy(b) {
 			result = 1
 		} else {
 			result = 0
@@ -415,6 +418,9 @@ func (interp *Interpreter) evaluateUnaryExpression(expr *ast.UnaryExpression) (*
 		return nil, err
 	}
 
+	if !isNumeric(operand) {
+		return nil, errors.NewRuntimeError(fmt.Sprintf("operator %s requires a numeric operand", expr.Operator))
+	}
 	if expr.Operator == ast.OpUnaryMinus {
 		if operand.IsArray {
 			result := make([]float64, len(operand.Array))

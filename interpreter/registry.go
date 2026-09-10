@@ -29,6 +29,7 @@ const (
 type streamingFunctionMetadata struct {
 	warmup          streamingWarmupKind
 	futureReference bool
+	stablePrefixes  bool
 }
 
 // NewFunctionRegistry creates a new function registry
@@ -213,5 +214,22 @@ func (r *FunctionRegistry) registerBuiltinStreamingMetadata() {
 	}
 	for _, name := range []string{"REFX", "REFXV"} {
 		r.streamingFunctions[name] = streamingFunctionMetadata{futureReference: true}
+	}
+	// Once warm-up has completed, these numeric functions never revise an
+	// earlier bar when more input arrives. Register clears this metadata when
+	// a caller overrides a builtin, so custom functions always use replay.
+	for _, name := range []string{
+		"MA", "EMA", "SMA", "WMA", "DMA", "SUM", "STD", "STDP", "STDDEV", "VAR", "VARP",
+		"DEVSQ", "FORCAST", "SLOPE", "COVAR", "RELATE", "BETA", "AVEDEV",
+		"MAX", "MIN", "ABS", "SQRT", "POW", "EXP", "LN", "LOG", "MOD", "CEILING", "FLOOR",
+		"INTPART", "FRACPART", "ROUND", "ROUND2", "SIGN", "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN",
+		"REF", "REFV", "HHV", "LLV", "HHVBARS", "LLVBARS", "SUMBARS",
+		"IF", "IFF", "IFN", "NOT", "COUNT", "EVERY", "EXIST", "EXISTR", "BETWEEN", "RANGE", "DRAWNULL",
+		"CROSS", "LONGCROSS", "BARSLAST", "BARSCOUNT", "BARSSINCE", "BARSLASTCOUNT",
+		"UPNDAY", "DOWNNDAY", "NDAY", "LAST", "FILTER", "VALUEWHEN",
+	} {
+		metadata := r.streamingFunctions[name]
+		metadata.stablePrefixes = true
+		r.streamingFunctions[name] = metadata
 	}
 }

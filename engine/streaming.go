@@ -14,10 +14,12 @@ import (
 // StreamingSession owns the mutable state for caller-driven streaming formula execution.
 // It is not safe for concurrent use.
 type StreamingSession struct {
-	program   *ast.Program
-	functions *interpreter.FunctionRegistry
-	history   []*types.MarketData
-	drawings  map[string]*types.DrawingEvent
+	program     *ast.Program
+	functions   *interpreter.FunctionRegistry
+	history     []*types.MarketData
+	drawings    map[string]*types.DrawingEvent
+	bulkWarmup  int
+	incremental *interpreter.IncrementalProgram
 }
 
 // NewStreamingSession creates a streaming session from a compiled program and optional seed history.
@@ -45,7 +47,17 @@ func (e *FormulaEngine) NewStreamingSession(program *ast.Program, seed []*types.
 		history:   history,
 		drawings:  make(map[string]*types.DrawingEvent),
 	}
+	if warmup, ok := functions.StreamingBulkWarmup(programCopy); ok {
+		session.bulkWarmup = warmup
+	}
+	session.incremental = functions.CompileIncremental(programCopy)
 	if len(history) > 0 {
+		if session.incremental != nil && len(history) >= session.incremental.Warmup() {
+			if err := session.incremental.Seed(history); err != nil {
+				return nil, err
+			}
+			return session, nil
+		}
 		execution, err := session.execute(history)
 		if err != nil {
 			return nil, err
@@ -102,13 +114,45 @@ func (s *StreamingSession) AppendMany(data []*types.MarketData) ([]*types.Stream
 	if err != nil {
 		return nil, err
 	}
+	if s.incrementalReady() {
+		return s.appendIncremental(incoming)
+	}
 
 	candidateHistory := cloneMarketDataSlice(s.history)
 	candidateDrawings := cloneDrawingSet(s.drawings)
+	candidateIncremental := s.incremental
 	results := make([]*types.StreamingResult, 0, len(incoming))
 
-	for _, item := range incoming {
+	for i, item := range incoming {
 		candidateHistory = append(candidateHistory, cloneMarketData(item))
+		if candidateIncremental != nil && len(candidateHistory) >= candidateIncremental.Warmup() {
+			candidateIncremental = candidateIncremental.Clone()
+			if err := candidateIncremental.Seed(candidateHistory); err != nil {
+				return nil, err
+			}
+			results = append(results, candidateIncremental.Latest())
+			for _, remaining := range incoming[i+1:] {
+				result, err := candidateIncremental.Append(remaining)
+				if err != nil {
+					return nil, err
+				}
+				candidateHistory = append(candidateHistory, remaining)
+				results = append(results, result)
+			}
+			break
+		}
+		if s.bulkWarmup > 0 && len(candidateHistory) >= s.bulkWarmup && i+1 < len(incoming) {
+			startBar := len(candidateHistory) - 1
+			candidateHistory = append(candidateHistory, incoming[i+1:]...)
+			interp := interpreter.NewInterpreterWithRegistry(candidateHistory, s.functions)
+			bulkResults, err := interp.ExecuteStreamingRange(s.program, startBar)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, bulkResults...)
+			// Only numeric programs qualify, so there is no drawing state to diff.
+			break
+		}
 		execution, err := s.execute(candidateHistory)
 		if err != nil {
 			return nil, err
@@ -119,6 +163,7 @@ func (s *StreamingSession) AppendMany(data []*types.MarketData) ([]*types.Stream
 		candidateDrawings = cloneDrawingSet(execution.Drawings)
 	}
 
+	s.incremental = candidateIncremental
 	s.history = candidateHistory
 	s.drawings = candidateDrawings
 	return results, nil
@@ -139,6 +184,14 @@ func (s *StreamingSession) UpdateCurrent(data *types.MarketData) (*types.Streami
 	if err := item.Validate(); err != nil {
 		return nil, formulaerrors.NewRuntimeError(fmt.Sprintf("invalid market data: %v", err))
 	}
+	if s.incrementalReady() {
+		result, err := s.incremental.UpdateCurrent(item)
+		if err != nil {
+			return nil, err
+		}
+		s.history[len(s.history)-1] = item
+		return result, nil
+	}
 
 	candidateHistory := cloneMarketDataSlice(s.history)
 	candidateHistory[len(candidateHistory)-1] = item
@@ -157,6 +210,30 @@ func (s *StreamingSession) UpdateCurrent(data *types.MarketData) (*types.Streami
 func (s *StreamingSession) execute(history []*types.MarketData) (*interpreter.StreamingExecution, error) {
 	interp := interpreter.NewInterpreterWithRegistry(history, s.functions)
 	return interp.ExecuteStreaming(s.program)
+}
+
+func (s *StreamingSession) incrementalReady() bool {
+	return s.incremental != nil && s.incremental.Len() == len(s.history) && len(s.history) >= s.incremental.Warmup()
+}
+
+func (s *StreamingSession) appendIncremental(incoming []*types.MarketData) ([]*types.StreamingResult, error) {
+	candidate := s.incremental
+	if len(incoming) > 1 {
+		// Copy only bounded indicator state, so a later bar failing rolls back
+		// the entire batch without copying the retained market history.
+		candidate = candidate.Clone()
+	}
+	results := make([]*types.StreamingResult, 0, len(incoming))
+	for _, data := range incoming {
+		result, err := candidate.Append(data)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	s.incremental = candidate
+	s.history = append(s.history, incoming...)
+	return results, nil
 }
 
 func cloneAndValidateMarketData(data []*types.MarketData) ([]*types.MarketData, error) {

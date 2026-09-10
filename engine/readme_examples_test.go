@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -36,6 +37,18 @@ func TestReadmeFormulaExamplesExecute(t *testing.T) {
 			}
 			if len(result.Outputs) == 0 && len(result.Variables) == 0 && len(result.Drawings) == 0 {
 				t.Fatalf("README formula example produced an empty result:\n%s", example.formula)
+			}
+			for _, output := range result.Outputs {
+				finite := false
+				for _, value := range output.Data {
+					if !math.IsNaN(value) && !math.IsInf(value, 0) {
+						finite = true
+						break
+					}
+				}
+				if !finite {
+					t.Fatalf("README output %s has no finite values:\n%s", output.Name, example.formula)
+				}
 			}
 			if strings.Contains(example.formula, "DRAWTEXT(") && len(result.Drawings) == 0 {
 				t.Fatalf("README drawing example produced no drawing events:\n%s", example.formula)

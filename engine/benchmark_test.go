@@ -188,6 +188,36 @@ func BenchmarkStreamingRepeatedUpdateMACD(b *testing.B) {
 	}
 }
 
+// Keep the replay path as a performance reference with identical formulas and data.
+func BenchmarkStreamingUpdateComparison(b *testing.B) {
+	for _, size := range []int{1000, 10000, 100000} {
+		for _, replay := range []bool{false, true} {
+			mode := "Incremental"
+			if replay {
+				mode = "Replay"
+			}
+			b.Run(fmt.Sprintf("%s/%dBars", mode, size), func(b *testing.B) {
+				session, err := NewFormulaEngine().NewStreamingSessionFromSource(benchmarkMACDFormula, createBenchmarkMarketData(size))
+				if err != nil {
+					b.Fatal(err)
+				}
+				if replay {
+					session.incremental = nil
+				}
+				bar := createBenchmarkMarketDataBar(size)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for range b.N {
+					benchmarkStreamingResult, err = session.UpdateCurrent(bar)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
+
 func benchmarkRunFormula(b *testing.B, formula string, marketData []*types.MarketData) {
 	b.Helper()
 	engine := NewFormulaEngine()
